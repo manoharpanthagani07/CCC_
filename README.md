@@ -93,3 +93,6 @@ The problem is modeled directly after the **0/1 Knapsack problem**:
 - **Weight (w)**: The duration of each movie.
 - **Value (v)**: The rating of each movie (scaled to integers).
 The C++ process constructs a 2D array to tabulate the maximum possible value for every capacity up to `W`, then backtracks through the array to identify exactly which movies were included in the optimal set.
+
+# Live Demo 🚀 :
+https://ccc-movie-suggestion.vercel.app/
