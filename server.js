@@ -1,7 +1,5 @@
 const express = require('express');
-const { spawn } = require('child_process');
 const path = require('path');
-const os = require('os');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,69 +15,56 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.post('/recommend', (req, res) => {
     const { totalTime, movies } = req.body;
 
-    // Support both totalTime and timeLimit for backward compatibility if needed, but spec says totalTime
     const timeLimit = totalTime || req.body.timeLimit;
 
     if (!timeLimit || !movies || !Array.isArray(movies)) {
         return res.status(400).json({ error: 'Invalid input. Ensure totalTime and movies array are provided.' });
     }
 
-    // Prepare input for C++ process
-    let input = `${timeLimit} ${movies.length}\n`;
-    for (const movie of movies) {
-        input += `${movie.duration} ${movie.rating} ${movie.name}\n`;
-    }
-
-    const knapsackExe = os.platform() === 'win32' ? 'knapsack.exe' : './knapsack';
-    const child = spawn(path.join(__dirname, knapsackExe));
-
-    let stdoutData = '';
-    let stderrData = '';
-
-    child.stdout.on('data', (data) => {
-        stdoutData += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-        stderrData += data.toString();
-    });
-
-    child.on('close', (code) => {
-        if (code !== 0) {
-            console.error('C++ process exited with code', code);
-            console.error(stderrData);
-            return res.status(500).json({ error: 'Internal server error during recommendation' });
-        }
-
-        const lines = stdoutData.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    // Pure JavaScript Knapsack DP Implementation
+    const n = movies.length;
+    const W = timeLimit;
+    
+    // dp[i][w] = max rating achievable using first i items with total duration <= w
+    const dp = Array(n + 1).fill(null).map(() => Array(W + 1).fill(0));
+    
+    for (let i = 1; i <= n; i++) {
+        const movie = movies[i - 1];
+        const weight = movie.duration;
+        const value = movie.rating;
         
-        if (lines.length === 0) {
-             return res.json({ totalRating: 0, selectedMovies: [], totalTimeUsed: 0 });
-        }
-
-        const totalRating = parseInt(lines[0], 10);
-        const selectedMovies = lines.slice(1);
-
-        // Calculate totalTimeUsed
-        let totalTimeUsed = 0;
-        for (const selectedName of selectedMovies) {
-            const matchedMovie = movies.find(m => m.name === selectedName);
-            if (matchedMovie) {
-                totalTimeUsed += matchedMovie.duration;
+        for (let w = 0; w <= W; w++) {
+            // Don't include current movie
+            dp[i][w] = dp[i - 1][w];
+            
+            // Include current movie if it fits
+            if (weight <= w) {
+                dp[i][w] = Math.max(dp[i][w], dp[i - 1][w - weight] + value);
             }
         }
+    }
 
-        res.json({ totalRating, selectedMovies, totalTimeUsed });
-    });
+    // Backtrack to find selected movies
+    const selectedMovies = [];
+    let w = W;
+    
+    for (let i = n; i > 0 && w > 0; i--) {
+        if (dp[i][w] !== dp[i - 1][w]) {
+            const movie = movies[i - 1];
+            selectedMovies.push(movie.name);
+            w -= movie.duration;
+        }
+    }
 
-    child.on('error', (err) => {
-        console.error('Failed to start C++ process:', err);
-        res.status(500).json({ error: 'Failed to start recommendation engine' });
-    });
+    const totalRating = dp[n][W];
+    const totalTimeUsed = selectedMovies.length > 0 
+        ? selectedMovies.reduce((sum, name) => {
+            const movie = movies.find(m => m.name === name);
+            return sum + (movie ? movie.duration : 0);
+        }, 0)
+        : 0;
 
-    // Write input to child process stdin
-    child.stdin.write(input);
-    child.stdin.end();
+    res.json({ totalRating, selectedMovies, totalTimeUsed });
 });
 
 app.listen(PORT, () => {
